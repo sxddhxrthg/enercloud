@@ -1,0 +1,295 @@
+// ENERCloud dashboard - plain JavaScript, no framework.
+const REFRESH_MS = 5000;
+const $ = (id) => document.getElementById(id);
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// Dashboard routes (GET /dashboard, POST /export) do not need the API key.
+// The key is required only on POST /readings (sensors).
+const config = { url: localStorage.getItem("enercloud_api_url") || "" };
+const isMock = () => !config.url;
+
+// ------------------------------------------------------------- data access (unchanged behaviour)
+async function loadDashboard() {
+  if (isMock()) return { data: buildMockDashboard(), ms: null };
+  const start = performance.now();
+  const res = await fetch(`${config.url.replace(/\/$/, "")}/dashboard`);
+  const ms = Math.round(performance.now() - start);
+  if (!res.ok) throw new Error(`GET /dashboard returned HTTP ${res.status}. Check the API URL.`);
+  return { data: await res.json(), ms };
+}
+
+async function exportReport() {
+  const msg = $("export-msg");
+  const btn = $("export-btn");
+  msg.className = "export__msg";
+  if (isMock()) { msg.textContent = "Export needs a live API connection."; return; }
+  btn.disabled = true;
+  btn.textContent = "Exporting…";
+  msg.textContent = "";
+  try {
+    const res = await fetch(`${config.url.replace(/\/$/, "")}/export`, {
+      method: "POST",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    msg.className = "export__msg is-success";
+    msg.replaceChildren(
+      el("span", `Report saved: ${body.records} records as JSON and CSV.`),
+      el("code", `s3://${body.bucket}/${body.json_key}`),
+    );
+  } catch (err) {
+    msg.className = "export__msg is-error";
+    msg.textContent = `Export failed: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Export report to S3";
+  }
+}
+
+// ------------------------------------------------------------- helpers
+// Values are inserted with textContent (never innerHTML), so data from the
+// database cannot inject HTML or script into the page.
+function el(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text !== undefined && text !== null) node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+const fmtTime = (iso) => (iso ? new Date(iso).toLocaleTimeString() : "–");
+const fmtKw = (n) => (typeof n === "number" ? n.toFixed(2) : "–");
+const fmtNum = (n, d = 1) => (typeof n === "number" ? n.toFixed(d) : "–");
+
+// Smoothly count a number from its previous value to the new one.
+function tween(node, to, decimals = 2) {
+  if (typeof to !== "number") { node.textContent = "–"; delete node.dataset.v; return; }
+  const from = node.dataset.v === undefined ? to : parseFloat(node.dataset.v);
+  node.dataset.v = to;
+  if (reducedMotion || from === to) { node.textContent = to.toFixed(decimals); return; }
+  const start = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / 600);
+    const eased = 1 - Math.pow(1 - t, 3);
+    node.textContent = (from + (to - from) * eased).toFixed(decimals);
+    if (t < 1 && node.dataset.v == to) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+// "THRESHOLD: 9.4 kW exceeds..." -> { rule: "Threshold", detail: "9.4 kW exceeds..." }
+function parseReason(reason) {
+  const i = reason.indexOf(": ");
+  if (i === -1) return { rule: "", detail: reason };
+  const rule = reason.slice(0, i);
+  return { rule: rule.charAt(0) + rule.slice(1).toLowerCase(), detail: reason.slice(i + 2) };
+}
+
+function badge(status) {
+  const label = { NORMAL: "Normal", ANOMALY: "Anomaly" }[status] || "No data";
+  return el("span", label, `badge badge--${status === "NORMAL" || status === "ANOMALY" ? status : "NODATA"}`);
+}
+
+function setConnection(state, label) {
+  $("conn").dataset.state = state;
+  $("conn-label").textContent = label;
+}
+
+// ------------------------------------------------------------- rendering
+function renderMix(buildings, total) {
+  const mix = $("mix");
+  const legend = $("mix-legend");
+  const live = buildings.filter((b) => b.latest && b.latest.power_kw > 0);
+  // Reuse segments so widths animate between refreshes.
+  while (mix.children.length > live.length) mix.lastChild.remove();
+  while (mix.children.length < live.length) mix.append(el("span"));
+  legend.replaceChildren();
+  live.forEach((b, i) => {
+    const seg = mix.children[i];
+    const anomaly = b.latest.status === "ANOMALY";
+    seg.style.flexGrow = b.latest.power_kw;
+    seg.style.opacity = anomaly ? 1 : 0.45 + 0.55 * (b.latest.power_kw / Math.max(...live.map((x) => x.latest.power_kw)));
+    seg.className = anomaly ? "is-anomaly" : "";
+    seg.title = `${b.name}: ${fmtKw(b.latest.power_kw)} kW`;
+    const li = el("li", b.building_id, anomaly ? "is-anomaly" : "");
+    li.append(el("b", total ? `${Math.round((b.latest.power_kw / total) * 100)}%` : "–"));
+    legend.append(li);
+  });
+}
+
+const seenAlerts = new Set();
+function renderAlerts(buildings) {
+  const box = $("alerts");
+  const active = buildings.filter((b) => b.latest && b.latest.status === "ANOMALY");
+  box.replaceChildren();
+  if (!active.length) {
+    box.append(el("p", `All ${buildings.length} buildings are within their normal range.`, "all-clear"));
+    return;
+  }
+  active.forEach((b) => {
+    const r = b.latest;
+    const key = `${b.building_id}|${r.ts}`;
+    const card = el("article", null, "alert" + (seenAlerts.has(key) ? "" : " is-new"));
+    seenAlerts.add(key);
+
+    const head = el("div");
+    const title = el("p", "ANOMALY DETECTED", "alert__title");
+    const time = el("time", fmtTime(r.ts));
+    time.dateTime = r.ts;
+    title.append(time);
+    const name = el("p", b.name, "alert__building");
+    name.append(el("small", b.building_id));
+    head.append(title, name);
+
+    const fact = (label, value, extra) => {
+      const dl = el("dl", null, "alert__fact" + (extra ? ` ${extra}` : ""));
+      dl.append(el("dt", label), el("dd", value));
+      return dl;
+    };
+    const deviation = typeof r.baseline_kw === "number" && r.baseline_kw > 0
+      ? `+${Math.round((r.power_kw / r.baseline_kw - 1) * 100)}% vs ${fmtKw(r.baseline_kw)} kW`
+      : "Baseline not yet available";
+
+    card.append(head,
+      fact("Current load", `${fmtKw(r.power_kw)} kW`, "alert__fact--power"),
+      fact("Hard limit", `${fmtNum(b.max_kw)} kW`),
+      fact("Baseline deviation", deviation));
+    box.append(card);
+  });
+}
+
+const meterRows = new Map();
+function renderMeters(buildings) {
+  const box = $("meters");
+  buildings.forEach((b) => {
+    let row = meterRows.get(b.building_id);
+    if (!row) {
+      row = { root: el("div", null, "meter") };
+      const name = el("div", b.name, "meter__name");
+      row.sub = el("span", null, "meter__sub");
+      name.append(row.sub);
+      row.gauge = el("div", null, "gauge");
+      row.gauge.setAttribute("role", "img");
+      row.band = el("div", null, "gauge__band");
+      row.fill = el("div", null, "gauge__fill");
+      row.limit = el("div", null, "gauge__limit");
+      row.gauge.append(el("div", null, "gauge__track"), row.band, row.fill, row.limit);
+      row.kw = el("div", null, "meter__kw");
+      row.kwValue = el("span", "–");
+      row.kw.append(row.kwValue, el("small", "kW"));
+      row.badge = badge("NODATA");
+      row.root.append(name, row.gauge, row.kw, row.badge);
+      box.append(row.root);
+      meterRows.set(b.building_id, row);
+    }
+
+    const latest = b.latest;
+    const status = latest ? latest.status : "NODATA";
+    const scale = b.max_kw * 1.6; // gauge runs past the limit so spikes stay visible
+    const pct = (v) => `${Math.min(100, (v / scale) * 100)}%`;
+
+    row.root.classList.toggle("is-anomaly", status === "ANOMALY");
+    row.sub.textContent = `${b.building_id}, normal ${fmtNum(b.normal_min_kw)}–${fmtNum(b.normal_max_kw)} kW`;
+    row.band.style.left = pct(b.normal_min_kw);
+    row.band.style.width = `calc(${pct(b.normal_max_kw)} - ${pct(b.normal_min_kw)})`;
+    row.limit.style.left = pct(b.max_kw);
+    row.limit.dataset.label = `${fmtNum(b.max_kw)} kW`;
+    row.fill.style.width = latest ? pct(latest.power_kw) : "0%";
+    row.gauge.setAttribute("aria-label",
+      `${b.name}: ${latest ? fmtKw(latest.power_kw) : "no"} kW, normal ${b.normal_min_kw} to ${b.normal_max_kw} kW, limit ${b.max_kw} kW`);
+    tween(row.kwValue, latest ? latest.power_kw : null);
+    const newBadge = badge(status);
+    if (newBadge.className !== row.badge.className) { row.badge.replaceWith(newBadge); row.badge = newBadge; }
+  });
+}
+
+function renderRows(tbodyId, rows, cols, buildRow, emptyText) {
+  const tbody = $(tbodyId);
+  tbody.replaceChildren();
+  if (!rows.length) {
+    const tr = el("tr", null, "empty");
+    const td = el("td", emptyText);
+    td.colSpan = cols;
+    tr.append(td);
+    tbody.append(tr);
+    return;
+  }
+  rows.forEach((r) => tbody.append(buildRow(r)));
+}
+
+function td(content, className) {
+  const cell = el("td", typeof content === "string" ? content : null, className);
+  if (content instanceof Node) cell.append(content);
+  return cell;
+}
+
+function render({ data, ms }) {
+  const s = data.summary;
+  tween($("total-kw"), s.total_power_kw);
+  $("stat-buildings").textContent = s.total_buildings;
+  $("stat-sensors").textContent = s.active_sensors;
+  $("stat-readings").textContent = s.readings_count;
+  $("stat-anomalies").textContent = s.anomaly_count;
+  $("anomaly-stat").classList.toggle("has-alerts", s.anomaly_count > 0);
+  $("stat-updated").textContent = fmtTime(data.generated_at);
+  $("stat-latency").textContent = ms === null ? "n/a" : `${ms} ms`;
+
+  renderMix(data.buildings, s.total_power_kw);
+  renderAlerts(data.buildings);
+  renderMeters(data.buildings);
+
+  renderRows("anomaly-rows", data.anomalies, 4, (r) => {
+    const tr = el("tr");
+    const rules = el("div");
+    (r.reasons || []).map(parseReason).forEach(({ rule, detail }) => {
+      const line = el("span", detail, "rule");
+      if (rule) line.prepend(el("b", rule));
+      rules.append(line);
+    });
+    tr.append(td(fmtTime(r.ts), "time"), td(r.building_id, "mono"), td(fmtKw(r.power_kw), "num"), td(rules));
+    return tr;
+  }, "No anomalies detected.");
+
+  renderRows("recent-rows", data.recent_readings.slice(0, 12), 6, (r) => {
+    const tr = el("tr", null, r.status === "ANOMALY" ? "is-anomaly" : "");
+    tr.append(td(fmtTime(r.ts), "time"), td(r.building_id, "mono"),
+      td(`${fmtNum(r.voltage)} V`, "num"), td(`${fmtNum(r.current, 2)} A`, "num"),
+      td(`${fmtKw(r.power_kw)} kW`, "num"), td(badge(r.status)));
+    return tr;
+  }, "No readings yet. Start the sensor simulator.");
+}
+
+async function refresh() {
+  $("mock-banner").hidden = !isMock();
+  try {
+    render(await loadDashboard());
+    $("error-banner").hidden = true;
+    if (isMock()) setConnection("mock", "Mock data");
+    else setConnection("live", "Live");
+  } catch (err) {
+    $("error-banner").textContent = err.message.includes("Failed to fetch")
+      ? "Could not reach the API. Check the URL, your internet connection, and CORS settings."
+      : err.message;
+    $("error-banner").hidden = false;
+    setConnection("error", "Connection error");
+  }
+}
+
+// ------------------------------------------------------------- settings (unchanged behaviour)
+function initSettings() {
+  $("api-url").value = config.url;
+  $("save-settings").addEventListener("click", () => {
+    config.url = $("api-url").value.trim();
+    localStorage.setItem("enercloud_api_url", config.url);
+    refresh();
+  });
+  $("use-mock").addEventListener("click", () => {
+    config.url = "";
+    localStorage.removeItem("enercloud_api_url");
+    $("api-url").value = "";
+    refresh();
+  });
+  $("export-btn").addEventListener("click", exportReport);
+}
+
+initSettings();
+refresh();
+setInterval(refresh, REFRESH_MS);

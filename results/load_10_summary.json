@@ -1,0 +1,17 @@
+{
+  "mode": "cloud",
+  "requests": 10,
+  "concurrency": 5,
+  "success": 10,
+  "failed": 0,
+  "success_rate_pct": 100.0,
+  "status_codes": {
+    "200": 10
+  },
+  "avg_ms": 1599.5,
+  "p50_ms": 1378.4,
+  "p95_ms": 2231.9,
+  "max_ms": 2231.9,
+  "wall_time_s": 3.53,
+  "throughput_rps": 2.83
+}

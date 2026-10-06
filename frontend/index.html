@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ENERCloud – Campus Energy Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 20 20"><path d="M11.5 1 3.5 11.5h5.5L8 19l8.5-11h-5.8z"/></svg>
+      </span>
+      <div>
+        <div class="brand__name">ENERCloud</div>
+        <div class="brand__tag">Campus energy intelligence</div>
+      </div>
+    </div>
+    <div class="topbar__status">
+      <span class="chip chip--env" id="env-chip" title="Deployment region read from the API URL">–</span>
+      <span class="chip chip--conn" id="conn" data-state="mock"><span class="dot" aria-hidden="true"></span><span id="conn-label">Mock</span></span>
+      <span class="readout"><span class="readout__k">API</span><span class="readout__v" id="stat-latency">–</span></span>
+      <span class="readout"><span class="readout__k">Updated</span><span class="readout__v" id="stat-updated">–</span></span>
+    </div>
+  </header>
+
+  <p id="mock-banner" class="notice" hidden>
+    Mock data generated in your browser. Nothing on screen comes from AWS. Open Connection settings to go live.
+  </p>
+  <p id="error-banner" class="notice notice--error" role="alert" hidden></p>
+
+  <main class="grid">
+    <!-- Campus load -->
+    <section class="card card--load" aria-labelledby="load-title">
+      <div class="card__head">
+        <h2 id="load-title" class="eyebrow">Campus load</h2>
+        <span class="delta" id="load-delta"></span>
+      </div>
+      <div class="load__row">
+        <p class="load__value"><span id="total-kw">–</span><span class="unit">kW</span></p>
+        <svg class="spark spark--campus" id="campus-spark" viewBox="0 0 240 64" preserveAspectRatio="none" role="img" aria-label="Campus load during this session"></svg>
+      </div>
+      <div class="mix" id="mix" role="img" aria-label="Share of campus load by building"></div>
+      <ul class="mix-legend" id="mix-legend"></ul>
+    </section>
+
+    <!-- Metric tiles -->
+    <section class="tiles" aria-label="System summary">
+      <div class="tile"><span class="eyebrow">Buildings</span><span class="tile__v" id="stat-buildings">–</span></div>
+      <div class="tile"><span class="eyebrow">Active sensors</span><span class="tile__v" id="stat-sensors">–</span></div>
+      <div class="tile"><span class="eyebrow">Readings</span><span class="tile__v" id="stat-readings">–</span></div>
+      <div class="tile tile--alert" id="anomaly-stat"><span class="eyebrow">Anomalies</span><span class="tile__v" id="stat-anomalies">–</span></div>
+    </section>
+
+    <!-- Active alerts -->
+    <section class="card card--alerts" aria-labelledby="alerts-title">
+      <div class="card__head">
+        <h2 id="alerts-title" class="eyebrow">Active alerts</h2>
+        <span class="count" id="alert-count">0</span>
+      </div>
+      <div id="alerts" class="alerts" aria-live="polite"></div>
+    </section>
+
+    <!-- Buildings -->
+    <section class="buildings" aria-labelledby="buildings-title">
+      <div class="section-head">
+        <h2 id="buildings-title" class="eyebrow">Building energy</h2>
+        <ul class="key" aria-label="Chart key">
+          <li><i class="key__band"></i>Normal range</li>
+          <li><i class="key__limit"></i>Hard limit</li>
+          <li><i class="key__fill"></i>Live load</li>
+        </ul>
+      </div>
+      <div id="meters" class="cards"></div>
+    </section>
+
+    <!-- Readings -->
+    <section class="card card--readings" aria-labelledby="recent-title">
+      <div class="card__head">
+        <h2 id="recent-title" class="eyebrow">Real-time readings</h2>
+        <span class="muted mono small">latest 12</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Time</th><th>Building</th><th class="num">Voltage</th><th class="num">Current</th><th class="num">Power</th><th>Status</th></tr></thead>
+          <tbody id="recent-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Anomaly log -->
+    <section class="card card--log" aria-labelledby="anom-title">
+      <div class="card__head">
+        <h2 id="anom-title" class="eyebrow">Anomaly log</h2>
+        <span class="muted mono small" id="log-count"></span>
+      </div>
+      <ol id="anomaly-rows" class="timeline"></ol>
+    </section>
+
+    <!-- Export -->
+    <section class="card card--export" aria-labelledby="export-title">
+      <div class="card__head"><h2 id="export-title" class="eyebrow">Report export</h2></div>
+      <p class="muted small">Writes the latest readings as JSON and CSV to the private S3 bucket.</p>
+      <button id="export-btn" type="button" class="btn btn--primary">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m0 0-3.5-3.5M10 12l3.5-3.5M4 14v3h12v-3"/></svg>
+        <span>Export to S3</span>
+      </button>
+      <div id="export-msg" class="export__msg" role="status"></div>
+    </section>
+
+    <!-- System status -->
+    <section class="card card--system" aria-labelledby="system-title">
+      <div class="card__head"><h2 id="system-title" class="eyebrow">System status</h2></div>
+      <dl class="kv">
+        <div><dt>Data source</dt><dd id="sys-source">–</dd></div>
+        <div><dt>Endpoint</dt><dd id="sys-endpoint">–</dd></div>
+        <div><dt>Polling</dt><dd id="sys-poll">–</dd></div>
+        <div><dt>Refreshes</dt><dd id="sys-refreshes">0</dd></div>
+        <div><dt>Failed refreshes</dt><dd id="sys-errors">0</dd></div>
+      </dl>
+    </section>
+
+    <!-- Connection -->
+    <section class="card card--conn" aria-label="Connection">
+      <details class="settings">
+        <summary class="eyebrow">Connection settings</summary>
+        <label for="api-url" class="eyebrow eyebrow--sm">API endpoint</label>
+        <input id="api-url" type="url" spellcheck="false" placeholder="https://xxxx.execute-api.region.amazonaws.com/prod">
+        <div class="settings__buttons">
+          <button id="save-settings" type="button" class="btn btn--primary btn--sm">Connect</button>
+          <button id="use-mock" type="button" class="btn btn--ghost btn--sm">Use mock data</button>
+        </div>
+        <p class="muted small">Dashboard routes don't use the sensor API key, so no secret is stored in the browser.</p>
+      </details>
+    </section>
+  </main>
+
+  <script src="mock.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

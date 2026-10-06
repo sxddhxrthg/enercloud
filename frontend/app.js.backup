@@ -1,0 +1,155 @@
+// ENERCloud dashboard - plain JavaScript, no framework.
+const REFRESH_MS = 5000;
+const $ = (id) => document.getElementById(id);
+
+// Dashboard routes (GET /dashboard, POST /export) do not need the API key.
+// The key is required only on POST /readings (sensors).
+const config = { url: localStorage.getItem("enercloud_api_url") || "" };
+const isMock = () => !config.url;
+
+// ------------------------------------------------------------- data access
+async function loadDashboard() {
+  if (isMock()) return { data: buildMockDashboard(), ms: null };
+  const start = performance.now();
+  const res = await fetch(`${config.url.replace(/\/$/, "")}/dashboard`);
+  const ms = Math.round(performance.now() - start);
+  if (!res.ok) throw new Error(`GET /dashboard returned HTTP ${res.status}. Check the API URL.`);
+  return { data: await res.json(), ms };
+}
+
+async function exportReport() {
+  const msg = $("export-msg");
+  if (isMock()) { msg.textContent = "Export needs a live API connection."; return; }
+  $("export-btn").disabled = true;
+  msg.textContent = "Exporting…";
+  try {
+    const res = await fetch(`${config.url.replace(/\/$/, "")}/export`, {
+      method: "POST",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    msg.textContent = `Saved to s3://${body.bucket}/${body.json_key}`;
+  } catch (err) {
+    msg.textContent = `Export failed: ${err.message}`;
+  } finally {
+    $("export-btn").disabled = false;
+  }
+}
+
+// ------------------------------------------------------------- rendering
+// All values are inserted with textContent (never innerHTML) so data coming
+// from the database cannot inject HTML/script into the page.
+function el(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text !== undefined && text !== null) node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+const fmtTime = (iso) => (iso ? new Date(iso).toLocaleTimeString() : "–");
+const fmtKw = (n) => (typeof n === "number" ? n.toFixed(2) : "–");
+
+function renderMeters(buildings) {
+  const box = $("meters");
+  box.replaceChildren();
+  buildings.forEach((b) => {
+    const latest = b.latest;
+    const scale = b.max_kw * 1.6; // gauge extends past the limit so spikes are visible
+    const pct = (v) => `${Math.min(100, (v / scale) * 100)}%`;
+
+    const row = el("div", null, "meter" + (latest && latest.status === "ANOMALY" ? " is-anomaly" : ""));
+    const name = el("div", b.name, "meter__name");
+    name.append(el("span", `${b.type}, ${b.building_id}`, "meter__type"));
+
+    const gauge = el("div", null, "gauge");
+    gauge.setAttribute("role", "img");
+    gauge.setAttribute("aria-label",
+      `${b.name}: ${latest ? fmtKw(latest.power_kw) : "no"} kW, normal ${b.normal_min_kw}-${b.normal_max_kw} kW, limit ${b.max_kw} kW`);
+    const band = el("div", null, "gauge__band");
+    band.style.left = pct(b.normal_min_kw);
+    band.style.width = `calc(${pct(b.normal_max_kw)} - ${pct(b.normal_min_kw)})`;
+    const fill = el("div", null, "gauge__fill");
+    fill.style.width = latest ? pct(latest.power_kw) : "0%";
+    const limit = el("div", null, "gauge__limit");
+    limit.style.left = pct(b.max_kw);
+    gauge.append(band, fill, limit);
+
+    const kw = el("div", latest ? fmtKw(latest.power_kw) : "–", "meter__kw");
+    kw.append(el("small", " kW"));
+    const status = latest ? latest.status : "NO DATA";
+    row.append(name, gauge, kw, el("div", status, `status status--${status}`));
+    box.append(row);
+  });
+}
+
+function renderRows(tbodyId, rows, cells, emptyText) {
+  const tbody = $(tbodyId);
+  tbody.replaceChildren();
+  if (!rows.length) {
+    const tr = el("tr", null, "empty");
+    const td = el("td", emptyText);
+    td.colSpan = 6;
+    tr.append(td);
+    tbody.append(tr);
+    return;
+  }
+  rows.forEach((r) => {
+    const tr = el("tr");
+    cells(r).forEach(([text, cls]) => tr.append(el("td", text, cls)));
+    tbody.append(tr);
+  });
+}
+
+function render({ data, ms }) {
+  const s = data.summary;
+  $("total-kw").textContent = fmtKw(s.total_power_kw);
+  $("stat-buildings").textContent = s.total_buildings;
+  $("stat-sensors").textContent = s.active_sensors;
+  $("stat-readings").textContent = s.readings_count;
+  $("stat-anomalies").textContent = s.anomaly_count;
+  $("stat-anomalies").parentElement.classList.toggle("has-alerts", s.anomaly_count > 0);
+  $("stat-updated").textContent = fmtTime(data.generated_at);
+  $("stat-latency").textContent = ms === null ? "n/a (mock)" : `${ms} ms`;
+
+  renderMeters(data.buildings);
+  renderRows("anomaly-rows", data.anomalies, (r) => [
+    [fmtTime(r.ts)], [r.building_id], [fmtKw(r.power_kw), "num"], [(r.reasons || []).join("; ")],
+  ], "No anomalies detected.");
+  renderRows("recent-rows", data.recent_readings, (r) => [
+    [fmtTime(r.ts)], [r.building_id], [r.voltage, "num"], [r.current, "num"],
+    [fmtKw(r.power_kw), "num"], [r.status, `status status--${r.status}`],
+  ], "No readings yet. Start the sensor simulator.");
+}
+
+async function refresh() {
+  $("mock-banner").hidden = !isMock();
+  try {
+    render(await loadDashboard());
+    $("error-banner").hidden = true;
+  } catch (err) {
+    $("error-banner").textContent = err.message.includes("Failed to fetch")
+      ? "Could not reach the API. Check the URL, your internet connection, and CORS settings."
+      : err.message;
+    $("error-banner").hidden = false;
+  }
+}
+
+// ------------------------------------------------------------- settings
+function initSettings() {
+  $("api-url").value = config.url;
+  $("save-settings").addEventListener("click", () => {
+    config.url = $("api-url").value.trim();
+    localStorage.setItem("enercloud_api_url", config.url);
+    refresh();
+  });
+  $("use-mock").addEventListener("click", () => {
+    config.url = "";
+    localStorage.removeItem("enercloud_api_url");
+    $("api-url").value = "";
+    refresh();
+  });
+  $("export-btn").addEventListener("click", exportReport);
+}
+
+initSettings();
+refresh();
+setInterval(refresh, REFRESH_MS);

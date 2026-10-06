@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ENERCloud – Campus Energy Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wordmark">
+      <svg class="wordmark__mark" viewBox="0 0 20 20" aria-hidden="true"><path d="M11 1 3 12h6l-1 7 8-11h-6z"/></svg>
+      <span class="wordmark__name">ENERCloud</span>
+      <span class="wordmark__tag">Campus Energy Intelligence</span>
+    </div>
+    <div class="topbar__right">
+      <div class="conn" id="conn" data-state="mock">
+        <span class="conn__dot" aria-hidden="true"></span>
+        <span id="conn-label">Mock data</span>
+      </div>
+      <dl class="topmeta">
+        <div><dt>API latency</dt><dd id="stat-latency">–</dd></div>
+        <div><dt>Updated</dt><dd id="stat-updated">–</dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <p id="mock-banner" class="notice" hidden>
+    You are viewing mock data generated in the browser. Nothing on this screen comes from AWS.
+    Connect an API Gateway URL in Connection settings to go live.
+  </p>
+  <p id="error-banner" class="notice notice--error" role="alert" hidden></p>
+
+  <main>
+    <section class="overview" aria-label="Campus overview">
+      <div class="load">
+        <h1 class="label">Campus load right now</h1>
+        <p class="load__value"><span id="total-kw">–</span><span class="load__unit">kW</span></p>
+        <div class="mix" id="mix" role="img" aria-label="Share of campus load by building"></div>
+        <ul class="mix-legend" id="mix-legend"></ul>
+      </div>
+      <dl class="summary">
+        <div><dt>Buildings</dt><dd id="stat-buildings">–</dd></div>
+        <div><dt>Active sensors</dt><dd id="stat-sensors">–</dd></div>
+        <div><dt>Readings loaded</dt><dd id="stat-readings">–</dd></div>
+        <div class="summary__anomalies" id="anomaly-stat"><dt>Anomalies</dt><dd id="stat-anomalies">–</dd></div>
+      </dl>
+    </section>
+
+    <section id="alerts" class="alerts" aria-live="polite" aria-label="Active alerts"></section>
+
+    <section class="panel" aria-labelledby="meters-title">
+      <div class="panel__head">
+        <h2 id="meters-title">Building load</h2>
+        <ul class="key" aria-label="Chart key">
+          <li><span class="key__band"></span>Normal range</li>
+          <li><span class="key__limit"></span>Hard limit (Rule 1)</li>
+          <li><span class="key__fill"></span>Live load</li>
+        </ul>
+      </div>
+      <div id="meters" class="meters"></div>
+    </section>
+
+    <div class="logs">
+      <section class="panel" aria-labelledby="anom-title">
+        <div class="panel__head"><h2 id="anom-title">Anomaly log</h2></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Building</th><th class="num">kW</th><th>Rule triggered</th></tr></thead>
+            <tbody id="anomaly-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="recent-title">
+        <div class="panel__head"><h2 id="recent-title">Recent readings</h2></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Building</th><th class="num">Voltage</th><th class="num">Current</th><th class="num">Power</th><th>Status</th></tr></thead>
+            <tbody id="recent-rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <section class="ops" aria-label="Actions and settings">
+      <div class="export">
+        <div>
+          <h2>Export report</h2>
+          <p class="muted">Writes the latest readings as JSON and CSV to the private S3 bucket.</p>
+        </div>
+        <button id="export-btn" type="button" class="btn btn--primary">Export report to S3</button>
+        <div id="export-msg" class="export__msg" role="status"></div>
+      </div>
+
+      <details class="settings">
+        <summary>Connection settings</summary>
+        <label for="api-url">API Gateway URL</label>
+        <input id="api-url" type="url" spellcheck="false" placeholder="https://xxxx.execute-api.ap-southeast-2.amazonaws.com/prod">
+        <p class="muted small">The dashboard routes do not use the sensor API key, so no secret is stored in the browser.</p>
+        <div class="settings__buttons">
+          <button id="save-settings" type="button" class="btn btn--primary">Connect</button>
+          <button id="use-mock" type="button" class="btn btn--ghost">Use mock data</button>
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <script src="mock.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

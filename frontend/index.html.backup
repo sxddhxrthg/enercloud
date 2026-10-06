@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ENERCloud – Campus Energy Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="mock-banner" class="banner banner--mock" hidden>
+    Showing mock data generated in the browser. Nothing here comes from AWS.
+    Add your API URL under Connection settings to go live.
+  </div>
+  <div id="error-banner" class="banner banner--error" hidden></div>
+
+  <header class="top">
+    <div class="brand">
+      <h1>ENERCloud</h1>
+      <p>Campus energy monitoring and anomaly detection</p>
+    </div>
+    <div class="total">
+      <span class="total__value" id="total-kw">–</span>
+      <span class="total__unit">kW campus load right now</span>
+    </div>
+  </header>
+
+  <section class="stats" aria-label="Summary">
+    <div><span id="stat-buildings">–</span> buildings</div>
+    <div><span id="stat-sensors">–</span> active sensors</div>
+    <div><span id="stat-readings">–</span> readings loaded</div>
+    <div class="stats__anomalies"><span id="stat-anomalies">–</span> anomalies</div>
+    <div class="stats__meta">Updated <span id="stat-updated">–</span>, API response <span id="stat-latency">–</span></div>
+  </section>
+
+  <main>
+    <section class="meters" aria-labelledby="meters-title">
+      <h2 id="meters-title">Building load</h2>
+      <p class="hint">Shaded band is the normal range. The red tick is the hard limit (Rule 1).</p>
+      <div id="meters"></div>
+    </section>
+
+    <div class="tables">
+      <section aria-labelledby="anom-title">
+        <h2 id="anom-title">Anomalies</h2>
+        <table>
+          <thead><tr><th>Time</th><th>Building</th><th>kW</th><th>Why it was flagged</th></tr></thead>
+          <tbody id="anomaly-rows"></tbody>
+        </table>
+      </section>
+
+      <section aria-labelledby="recent-title">
+        <h2 id="recent-title">Recent readings</h2>
+        <table>
+          <thead><tr><th>Time</th><th>Building</th><th>V</th><th>A</th><th>kW</th><th>Status</th></tr></thead>
+          <tbody id="recent-rows"></tbody>
+        </table>
+      </section>
+    </div>
+
+    <section class="actions">
+      <button id="export-btn" type="button">Export report to S3</button>
+      <span id="export-msg" role="status"></span>
+    </section>
+
+    <details class="settings">
+      <summary>Connection settings</summary>
+      <label>API URL (API Gateway invoke URL, ending in /prod)
+        <input id="api-url" type="url" placeholder="https://xxxx.execute-api.ap-south-1.amazonaws.com/prod">
+      </label>
+      <div class="settings__buttons">
+        <button id="save-settings" type="button">Connect</button>
+        <button id="use-mock" type="button" class="secondary">Use mock data</button>
+      </div>
+    </details>
+  </main>
+
+  <script src="mock.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
